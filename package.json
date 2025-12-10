@@ -116,6 +116,7 @@
     "shapefile": "^0.6.6",
     "spatialite": "^0.1.0",
     "spl.js": "^0.1.2",
+    "sql.js": "^1.13.0",
     "sqlite3": "^5.1.7",
     "the-new-css-reset": "^1.7.3",
     "threads": "^1.7.0",
