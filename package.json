@@ -12,7 +12,7 @@
     "Johanna Bänsch <j.baensch@tu-berlin.de>"
   ],
   "scripts": {
-    "deploy": "bash scripts/deploy-ghpages.sh tomstephen/simwrapper /",
+    "deploy": "bash scripts/deploy-ghpages.sh tomstephen/simwrapper simwrapper",
     "index": "node scripts/build-index.cjs public/data",
     "dev": "npm run index && vite",
     "serve": "npm run index && vite",
