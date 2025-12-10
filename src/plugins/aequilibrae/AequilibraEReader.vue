@@ -27,13 +27,14 @@ import type { PropType } from 'vue'
 import debounce from 'debounce'
 
 import globalStore from '@/store'
-import HTTPFileSystem from '@/js/HTTPFileSystem'
+import AequilibraEFileSystem from '@/plugins/aequilibrae/AequilibraEFileSystem'
 
 import { FileSystemConfig, UI_FONT, BG_COLOR_DASHBOARD } from '@/Globals'
 
-//@ts-ignore
-const isChrome = !!window.showDirectoryPicker // Chrome has File Access API
-const isFirefox = !isChrome
+import initSqlJs from 'sqlite3' // I dont think this method exists, good ol AI hallucination
+import { Data } from 'vega'
+
+type Database = any
 
 const MyComponent = defineComponent({
   name: 'AequilibraEReader',
@@ -53,7 +54,9 @@ const MyComponent = defineComponent({
       vizDetails: { title: '', description: '', file: '' },
       loadingText: '',
       id: `id-${Math.floor(1e12 * Math.random())}` as any,
-      sqliteWorker: null as any,
+      aeqFileSystem: new AequilibraEFileSystem(this.fileSystem, globalStore),
+      sqlite3: null as any,
+      db: null as any,
       databaseData: null as any,
       viewData: {} as any,
       searchTerm: '',
@@ -70,10 +73,6 @@ const MyComponent = defineComponent({
   },
 
   computed: {
-    fileApi(): HTTPFileSystem {
-      return new HTTPFileSystem(this.fileSystem, globalStore)
-    },
-
     fileSystem(): FileSystemConfig {
       const svnProject: FileSystemConfig[] = this.$store.state.svnProjects.filter(
         (a: FileSystemConfig) => a.slug === this.root
@@ -87,7 +86,7 @@ const MyComponent = defineComponent({
   },
 
   async mounted() {
-    this.debounceSearch = debounce(this.handleSearch, 500)
+    // this.debounceSearch = debounce(this.handleSearch, 500)
 
     try {
       this.getVizDetails()
@@ -125,40 +124,49 @@ const MyComponent = defineComponent({
       this.$emit('titles', this.vizDetails.title || 'AequilibraE Database')
     },
 
-    async fetchDatabase() {
-      this.loadingText = `Loading ${this.vizDetails.file}...`
-
-      // TODO: Load SQLite database file as ArrayBuffer
-      // TODO: Initialize sql.js and create database instance
-      // TODO: Query for tables and metadata
-      // TODO: Return structured data with tables/columns/row counts
-      
-      // For now, return placeholder
-      return {
-        tables: [],
-        metadata: {},
-      }
+    async initSqlJs() {
+      if (this.sqlite3) return this.sqlite3
+      this.sqlite3 = await initSqlJs({
+        locateFile: (file: string) => `https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.6.2/${file}`,
+      })
+      return this.sqlite3
     },
 
-    async handleSearch() {
-      console.log('search:', this.searchTerm)
-
-      if (!this.searchTerm) {
-        // clear empty search
-        this.viewData = this.databaseData
-        this.isSearch = false
-      } else {
-        // TODO: Filter tables by search term
-        // TODO: Search in table names, column names, or data
-        this.viewData = this.databaseData
-        this.isSearch = true
-      }
-      this.isLoaded = false
-      await this.$nextTick()
-      this.isLoaded = true
+    async loadDatabase(filepath: string): Promise<Database> {
+      const arrayBuffer = await this.aeqFileSystem.loadAequilibraEDatabase(filepath)
+      const db = new this.sqlite3.Database(new Uint8Array(arrayBuffer))
+      return db
     },
 
+    getTableNames(db: Database): string[] {
+      if (!db) throw new Error(`Database ${db} not found`)
 
+      const res = db.exec("SELECT name FROM sqlite_master WHERE type='table';")
+
+      return res.length > 0 ? res[0].values.flat() as string[] : []
+    },
+
+    gettableSchema(db: Database, tableName: string): { name: string; type: string; nullable: boolean }[] {
+      if (!db) throw new Error(`Database ${db} not found`)
+
+      const res = db.exec(`PRAGMA table_info(${tableName});`)
+
+      return res.length > 0
+        ? res[0].values.map((row: any[]) => ({
+            name: row[1],
+            type: row[2],
+            nullable: row[3] === 0,
+          }))
+        : []
+    },
+
+    async readTable(db: Database, tableName: string): Promise<any[]> {
+      if (!db) throw new Error(`Database ${db} not found`)
+
+      const res = db.exec(`SELECT * FROM ${tableName};`)
+
+      return res.length > 0 ? res[0].values : []
+    },
   },
 })
 
