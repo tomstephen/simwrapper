@@ -1,0 +1,14 @@
+# Example AequilibraE visualization configuration
+# Place this file alongside your project_database.sqlite file
+
+title: "AequilibraE Network Visualization"
+description: "Visualize network nodes, links, and zones from AequilibraE"
+
+# Path to the AequilibraE database file (relative to this YAML file)
+database: project_database.sqlite
+
+# The plugin will automatically:
+# 1. Load the database with Spatialite support
+# 2. Extract geometry from nodes, links, and zones tables
+# 3. Display them on an interactive map
+# 4. Show table schemas in table view
