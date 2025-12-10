@@ -31,7 +31,7 @@ import AequilibraEFileSystem from '@/plugins/aequilibrae/AequilibraEFileSystem'
 
 import { FileSystemConfig, UI_FONT, BG_COLOR_DASHBOARD } from '@/Globals'
 
-import initSqlJs from 'sqlite3' // I dont think this method exists, good ol AI hallucination
+import sqlite3 from 'sqlite3'
 import { Data } from 'vega'
 
 type Database = any
@@ -92,12 +92,6 @@ const MyComponent = defineComponent({
       this.getVizDetails()
       // only continue if we are on a real page and not the file browser
       if (this.thumbnail) return
-
-      const dbData = await this.fetchDatabase()
-
-      this.databaseData = dbData
-      this.viewData = this.databaseData
-      this.isLoaded = true
     } catch (err) {
       const e = err as any
       console.error({ e })
@@ -124,17 +118,9 @@ const MyComponent = defineComponent({
       this.$emit('titles', this.vizDetails.title || 'AequilibraE Database')
     },
 
-    async initSqlJs() {
-      if (this.sqlite3) return this.sqlite3
-      this.sqlite3 = await initSqlJs({
-        locateFile: (file: string) => `https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.6.2/${file}`,
-      })
-      return this.sqlite3
-    },
-
     async loadDatabase(filepath: string): Promise<Database> {
-      const arrayBuffer = await this.aeqFileSystem.loadAequilibraEDatabase(filepath)
-      const db = new this.sqlite3.Database(new Uint8Array(arrayBuffer))
+      // const arrayBuffer = await this.aeqFileSystem.loadAequilibraEDatabase(filepath)
+      const db = new sqlite3.Database(filepath)
       return db
     },
 
