@@ -20,11 +20,27 @@
               | {{ col.name }} ({{ col.type }})
 
   .map-viewer(v-show="viewMode === 'map' && isLoaded")
-    aeq-map-component(v-if="geoJsonFeatures.length > 0"
-      :dark="globalState.isDarkMode"
+    DeckMapComponent(v-if="geoJsonFeatures.length > 0 && bgLayers"
       :features="geoJsonFeatures"
-      :viewId="layerId"
-      @featureClick="handleFeatureClick"
+      :bgLayers="bgLayers"
+      :cbTooltip="handleTooltip"
+      :cbClickEvent="handleFeatureClick"
+      :dark="globalState.isDarkMode"
+      :featureFilter="featureFilter"
+      :fillColors="fillColors"
+      :fillHeights="fillHeights"
+      :highlightedLinkIndex="-1"
+      :initialView="null"
+      :isRGBA="false"
+      :isAtlantis="false"
+      :lineColors="lineColors"
+      :lineWidths="lineWidths"
+      :mapIsIndependent="false"
+      :opacity="0.8"
+      :pointRadii="pointRadii"
+      :redraw="redrawCounter"
+      :screenshot="0"
+      :viewId="parseInt(layerId.replace(/\D/g, ''), 10)"
     )
 
 </template>
@@ -43,7 +59,8 @@ import debounce from 'debounce'
 
 import globalStore from '@/store'
 import AequilibraEFileSystem from '@/plugins/aequilibrae/AequilibraEFileSystem'
-import AeqMapComponent from '@/plugins/aequilibrae/AequilibraEMapComponent.vue'
+import DeckMapComponent from '@/plugins/shape-file/DeckMapComponent.vue'
+import BackgroundLayers from '@/js/BackgroundLayers'
 
 import { FileSystemConfig, UI_FONT, BG_COLOR_DASHBOARD } from '@/Globals'
 
@@ -54,7 +71,7 @@ const MyComponent = defineComponent({
   name: 'AequilibraEReader',
   i18n,
   components: {
-    AeqMapComponent,
+    DeckMapComponent,
   },
   props: {
     root: { type: String, required: true },
@@ -86,6 +103,15 @@ const MyComponent = defineComponent({
       viewMode: 'table' as 'table' | 'map',
       geoJsonFeatures: [] as any[],
       hasGeometry: false,
+      // DeckMapComponent props
+      bgLayers: null as BackgroundLayers | null,
+      featureFilter: new Float32Array(),
+      fillColors: '#59a14f' as string,
+      fillHeights: 0 as number,
+      lineColors: '#4e79a7' as string,
+      lineWidths: 2 as number,
+      pointRadii: 4 as number,
+      redrawCounter: 0,
     }
   },
 
@@ -110,6 +136,18 @@ const MyComponent = defineComponent({
 
   async mounted() {
     this.aeqFileSystem = new AequilibraEFileSystem(this.fileSystem, globalStore)
+    
+    // Initialize background layers
+    try {
+      this.bgLayers = new BackgroundLayers({
+        vizDetails: this.vizDetails,
+        fileApi: this.aeqFileSystem,
+        subfolder: this.subfolder,
+      })
+      await this.bgLayers.initialLoad()
+    } catch (e) {
+      console.warn('Could not load background layers:', e)
+    }
 
     try {
       await this.getVizDetails()
@@ -329,6 +367,9 @@ const MyComponent = defineComponent({
         }
         
         console.log(`Total features extracted: ${this.geoJsonFeatures.length}`)
+        
+        // Update map visualization
+        this.updateMapColors()
       } catch (err) {
         console.error('Error extracting geometry:', err)
       }
@@ -338,6 +379,48 @@ const MyComponent = defineComponent({
       // Handle click on map features
       if (!feature) return
       console.log('Clicked feature:', feature.properties)
+    },
+
+    handleTooltip(hoverInfo: any) {
+      // Handle tooltip display for DeckMapComponent
+      if (!hoverInfo?.object?.properties) return ''
+      
+      const props = hoverInfo.object.properties
+      const lines = []
+      
+      // Show table name
+      if (props._table) lines.push(`Table: ${props._table}`)
+      
+      // Show up to 5 most relevant properties
+      const excludeProps = ['_table', 'geometry']
+      const relevantProps = Object.entries(props)
+        .filter(([key]) => !excludeProps.includes(key))
+        .slice(0, 5)
+      
+      for (const [key, value] of relevantProps) {
+        if (value !== null && value !== undefined) {
+          lines.push(`${key}: ${value}`)
+        }
+      }
+      
+      return lines.join('<br/>')
+    },
+
+    updateMapColors() {
+      // This method can be extended later to support property-based coloring
+      // For now, use default colors
+      const featureCount = this.geoJsonFeatures.length
+      if (featureCount === 0) return
+      
+      // Create filters (all features visible by default)
+      this.featureFilter = new Float32Array(featureCount).fill(1)
+      
+      // Could add logic here to color by properties, e.g.:
+      // if (colorProperty && this.geoJsonFeatures[0]?.properties?.[colorProperty]) {
+      //   this.lineColors = this.calculateColorsByProperty(colorProperty)
+      // }
+      
+      this.redrawCounter++
     },
 
 
