@@ -139,7 +139,7 @@ let fileSystems: FileSystemConfig[] = [
     description: 'Example data from the AequilibraE plugin',
     thumbnail: 'images/thumb-localfiles.jpg',
     example: true,
-    baseURL: 'https://us-east-1.console.aws.amazon.com/s3/buckets/aeqwrapper?region=us-east-1',
+    baseURL: 'https://aeqwrapper.s3.amazonaws.com/',
   },
   {
     name: 'VSP/ZIB LakeFS',
