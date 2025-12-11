@@ -81,13 +81,14 @@ const MyComponent = defineComponent({
   },
 
   data() {
+    const uniqueId = `id-${Math.floor(1e12 * Math.random())}`
     return {
       globalState: globalStore.state,
       vizDetails: { title: '', description: '', database: '', view: '', layers: {} } as VizDetails,
       layerConfigs: {} as { [layerName: string]: LayerConfig },
       loadingText: '',
-      id: `id-${Math.floor(1e12 * Math.random())}` as any,
-      layerId: 'aequilibrae-layer-1' as string,
+      id: uniqueId as any,
+      layerId: `aequilibrae-layer-${uniqueId}` as string,
       aeqFileSystem: null as any,
       spl: null as any,
       db: null as any,
