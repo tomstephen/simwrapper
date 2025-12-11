@@ -134,6 +134,14 @@ let fileSystems: FileSystemConfig[] = [
   // ----------- End. Below here, these are editable: -------------------
 
   {
+    name: 'AequilibraE Example Data',
+    slug: 'aequilibrae-example',
+    description: 'Example data from the AequilibraE plugin',
+    thumbnail: 'images/thumb-localfiles.jpg',
+    example: true,
+    baseURL: 'https://us-east-1.console.aws.amazon.com/s3/buckets/aeqwrapper?region=us-east-1',
+  },
+  {
     name: 'VSP/ZIB LakeFS',
     hidden: true,
     slug: 'vsp-zib',
