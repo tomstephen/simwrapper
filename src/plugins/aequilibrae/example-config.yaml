@@ -7,8 +7,35 @@ description: "Visualize network nodes, links, and zones from AequilibraE"
 # Path to the AequilibraE database file (relative to this YAML file)
 database: project_database.sqlite
 
-# The plugin will automatically:
-# 1. Load the database with Spatialite support
-# 2. Extract geometry from nodes, links, and zones tables
-# 3. Display them on an interactive map
-# 4. Show table schemas in table view
+# Define which database tables/layers to render and their styling
+layers:
+  zones:
+    table: zones  # Table name in the database
+    type: polygon  # geometry type: polygon, line, point
+    fillColor: "#E5E5E5"  # Light grey fill
+    strokeColor: "#666666"  # Dark grey outline
+    strokeWidth: 2
+    opacity: 0.6
+    zIndex: 1  # Render order (lower = underneath)
+    
+  links:
+    table: links
+    type: line
+    strokeColor: "#FF6600"  # Bright orange
+    strokeWidth: 3
+    opacity: 0.9
+    zIndex: 2  # Render on top
+    
+  nodes:
+    table: nodes
+    type: point
+    fillColor: "#0066CC"  # Blue points
+    radius: 4
+    opacity: 0.8
+    zIndex: 3  # Render on top
+
+# Optional: Color features by properties
+# colorBy:
+#   property: "volume"  # Column name to color by
+#   colorScale: "viridis"  # Color scale: viridis, plasma, inferno, turbo
+#   range: [0, 1000]  # Data range for color scaling

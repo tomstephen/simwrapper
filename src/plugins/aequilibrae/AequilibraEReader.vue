@@ -20,7 +20,7 @@
               | {{ col.name }} ({{ col.type }})
 
   .map-viewer(v-show="viewMode === 'map' && isLoaded")
-    DeckMapComponent(v-if="geoJsonFeatures.length > 0 && bgLayers"
+    DeckMapComponent(v-if="geoJsonFeatures.length > 0 && bgLayers && layerId"
       :features="geoJsonFeatures"
       :bgLayers="bgLayers"
       :cbTooltip="handleTooltip"
@@ -31,16 +31,16 @@
       :fillHeights="fillHeights"
       :highlightedLinkIndex="-1"
       :initialView="null"
-      :isRGBA="false"
+      :isRGBA="isRGBA"
       :isAtlantis="false"
       :lineColors="lineColors"
       :lineWidths="lineWidths"
       :mapIsIndependent="false"
-      :opacity="0.8"
+      :opacity="1.0"
       :pointRadii="pointRadii"
       :redraw="redrawCounter"
       :screenshot="0"
-      :viewId="parseInt(layerId.replace(/\D/g, ''), 10)"
+      :viewId="layerId"
     )
 
 </template>
@@ -67,6 +67,17 @@ import { FileSystemConfig, UI_FONT, BG_COLOR_DASHBOARD } from '@/Globals'
 import SPL from 'spl.js'
 import YAML from 'yaml'
 
+interface LayerConfig {
+  table: string
+  type: 'polygon' | 'line' | 'point'
+  fillColor?: string
+  strokeColor?: string
+  strokeWidth?: number
+  radius?: number
+  opacity?: number
+  zIndex?: number
+}
+
 const MyComponent = defineComponent({
   name: 'AequilibraEReader',
   i18n,
@@ -85,15 +96,17 @@ const MyComponent = defineComponent({
   data() {
     return {
       globalState: globalStore.state,
-      vizDetails: { title: '', description: '', database: '', view: '' } as {
+      vizDetails: { title: '', description: '', database: '', view: '', layers: {} } as {
         title: string
         description: string
         database: string
         view: 'table' | 'map' | ''
+        layers: { [key: string]: LayerConfig }
       },
+      layerConfigs: {} as { [layerName: string]: LayerConfig },
       loadingText: '',
       id: `id-${Math.floor(1e12 * Math.random())}` as any,
-      layerId: `aeq-layer-${Math.floor(1e12 * Math.random())}` as string,
+      layerId: 'aequilibrae-layer-1' as string,
       aeqFileSystem: null as any,
       spl: null as any,
       db: null as any,
@@ -106,12 +119,13 @@ const MyComponent = defineComponent({
       // DeckMapComponent props
       bgLayers: null as BackgroundLayers | null,
       featureFilter: new Float32Array(),
-      fillColors: '#59a14f' as string,
+      fillColors: '#59a14f' as string | Uint8ClampedArray,
       fillHeights: 0 as number,
-      lineColors: '#4e79a7' as string,
-      lineWidths: 2 as number,
-      pointRadii: 4 as number,
+      lineColors: '#4e79a7' as string | Uint8ClampedArray,
+      lineWidths: 2 as number | Float32Array,
+      pointRadii: 4 as number | Float32Array,
       redrawCounter: 0,
+      isRGBA: false,
     }
   },
 
@@ -135,24 +149,39 @@ const MyComponent = defineComponent({
   },
 
   async mounted() {
+    console.log('🔧 AequilibraEReader: Starting component initialization')
+    console.log('📊 Props:', { root: this.root, subfolder: this.subfolder, thumbnail: this.thumbnail, yamlConfig: this.yamlConfig })
+    
     this.aeqFileSystem = new AequilibraEFileSystem(this.fileSystem, globalStore)
+    console.log('💾 File system initialized:', this.fileSystem.name)
     
     // Initialize background layers
     try {
+      console.log('🗺️  Initializing background layers...')
       this.bgLayers = new BackgroundLayers({
         vizDetails: this.vizDetails,
         fileApi: this.aeqFileSystem,
         subfolder: this.subfolder,
       })
       await this.bgLayers.initialLoad()
+      console.log('✅ Background layers loaded successfully')
     } catch (e) {
-      console.warn('Could not load background layers:', e)
+      console.warn('⚠️  Could not load background layers:', e)
     }
 
     try {
+      console.log('📋 Loading visualization configuration...')
       await this.getVizDetails()
+      console.log('✅ Configuration loaded:', {
+        title: this.vizDetails.title,
+        database: this.vizDetails.database,
+        layerCount: Object.keys(this.layerConfigs).length,
+        layers: Object.keys(this.layerConfigs)
+      })
+      
       // only continue if we are on a real page and not the file browser
       if (this.thumbnail) {
+        console.log('🖼️  Thumbnail mode - skipping data loading')
         this.$emit('isLoaded')
         return
       }
@@ -160,27 +189,39 @@ const MyComponent = defineComponent({
       // Initialize spl.js with spatialite support
       if (!this.spl) {
         this.loadingText = 'Loading SQL engine with spatialite...'
+        console.log('🔍 Initializing SPL.js with spatialite support...')
         this.spl = await SPL()
-        console.log('SPL engine initialized with spatialite')
+        console.log('✅ SPL engine initialized with spatialite support')
       }
 
       // Load the database
       this.loadingText = 'Loading database...'
-      console.log(this.loadingText)
+      console.log(`💾 Loading database from: ${this.vizDetails.database}`)
       const dbPath = this.vizDetails.database
       await this.loadDatabase(dbPath)
+      console.log('✅ Database loaded successfully')
       
       // Get table information
       this.loadingText = 'Reading tables...'
-      console.log(this.loadingText)
+      console.log('📊 Discovering database tables...')
       const tableNames = await this.getTableNames(this.db)
+      console.log(`📋 Found ${tableNames.length} tables in database:`, tableNames)
+      
+      // Determine which tables to load based on layer configuration
+      console.log(this.layerConfigs)
+      const tablesToLoad = Object.keys(this.layerConfigs).length > 0 
+        ? [...new Set(Object.values(this.layerConfigs).map(config => config.table))] // Get unique table names from layer configs
+        : ['nodes', 'links', 'zones'] // Fallback to default AequilibraE tables
+      
+      console.log(`🎯 Target tables to load (${tablesToLoad.length}):`, tablesToLoad)
+      console.log('📐 Layer configurations:', this.layerConfigs)
       
       for (const tableName of tableNames) {
-        const allowedTables = ['nodes', 'links', 'zones']
-        if (allowedTables.includes(tableName.toLowerCase())) {
-          console.log(tableName)
+        if (tablesToLoad.includes(tableName)) {
+          console.log(`📊 Loading table schema: ${tableName}`)
   
           const schema = await this.getTableSchema(this.db, tableName)
+          console.log(`  └─ Schema (${schema.length} columns):`, schema.map(col => `${col.name}:${col.type}`).join(', '))
           const rowCount = await this.getRowCount(this.db, tableName)
           
           // Check if table has geometry column
@@ -201,7 +242,11 @@ const MyComponent = defineComponent({
       // Extract geometry if available
       if (this.hasGeometry) {
         this.loadingText = 'Extracting geometries...'
+        console.log('🗺️  Starting geometry extraction from tables with spatial data')
         await this.extractGeometryData()
+        console.log(`✅ Geometry extraction complete. Total features: ${this.geoJsonFeatures.length}`)
+      } else {
+        console.log('⚠️  No geometry columns found in loaded tables')
       }
 
       // Apply default view from config (only switch to map if geometry exists)
@@ -213,10 +258,18 @@ const MyComponent = defineComponent({
 
       this.isLoaded = true
       this.loadingText = ''
+      console.log('🎉 AequilibraE component fully loaded and ready!')
+      console.log('📊 Final state:', {
+        tables: this.tables.length,
+        features: this.geoJsonFeatures.length,
+        hasGeometry: this.hasGeometry,
+        viewMode: this.viewMode
+      })
       this.$emit('isLoaded')
     } catch (err) {
       const e = err as any
-      console.error({ e })
+      console.error('❌ Error during AequilibraE loading:', e)
+      console.error('  └─ Error details:', { message: e.message, stack: e.stack })
       this.loadingText = `Error: ${e.message || e}`
       this.$emit('isLoaded')
     }
@@ -224,9 +277,10 @@ const MyComponent = defineComponent({
 
   methods: {
     async getVizDetails() {
-      console.log('Config object:', this.config)
-      console.log('Subfolder:', this.subfolder)
-      console.log('yamlConfig:', this.yamlConfig)
+      console.log('⚙️  Getting visualization details...')
+      console.log('  📝 Config object:', this.config)
+      console.log('  📁 Subfolder:', this.subfolder)
+      console.log('  📄 yamlConfig:', this.yamlConfig)
       
       if (this.config) {
         // config came in from the dashboard and is already parsed
@@ -236,18 +290,26 @@ const MyComponent = defineComponent({
         this.vizDetails.database = dbFile.startsWith('/') ? dbFile : `${this.subfolder}/${dbFile}`
         // Capture view preference from config
         if (this.config.view) this.vizDetails.view = this.config.view
+        
+        // Populate layer configurations for rendering
+        this.layerConfigs = this.config.layers || {}
+        
         console.log('Final database path:', this.vizDetails.database)
         this.$emit('titles', this.vizDetails.title || dbFile || 'AequilibraE Database')
       } else if (this.yamlConfig) {
         // Need to load and parse the YAML file first
         const yamlPath = this.subfolder ? `${this.subfolder}/${this.yamlConfig}` : this.yamlConfig
-        console.log('Loading YAML file from:', yamlPath)
+        console.log('📄 Loading YAML configuration from:', yamlPath)
         
         const yamlBlob = await this.aeqFileSystem.getFileBlob(yamlPath)
-        const yamlText = await yamlBlob.text()
-        const config = YAML.parse(yamlText)
+        console.log('  └─ YAML file loaded, size:', yamlBlob.size, 'bytes')
         
-        console.log('Parsed YAML config:', config)
+        const yamlText = await yamlBlob.text()
+        console.log('  └─ YAML text length:', yamlText.length, 'characters')
+        
+        const config = YAML.parse(yamlText)
+        console.log('  └─ Parsed YAML config:', config)
+        console.log('  └─ Layer definitions found:', Object.keys(config.layers || {}).length)
         
         // Now get the database path from the YAML
         const dbFile = config.database || config.file
@@ -264,7 +326,11 @@ const MyComponent = defineComponent({
           description: config.description || '',
           database: databasePath,
           view: config.view || '',
+          layers: config.layers || {},
         }
+        
+        // Populate layer configurations for rendering
+        this.layerConfigs = this.vizDetails.layers || {}
         
         console.log('Final database path:', this.vizDetails.database)
         this.$emit('titles', this.vizDetails.title)
@@ -274,50 +340,104 @@ const MyComponent = defineComponent({
     },
 
     async loadDatabase(filepath: string): Promise<void> {
-      console.log('Loading database from:', filepath)
+      console.log('💾 Loading database from:', filepath)
       
-      const blob = await this.aeqFileSystem.getFileBlob(filepath)
-      const arrayBuffer = await blob.arrayBuffer()
+      try {
+        const blob = await this.aeqFileSystem.getFileBlob(filepath)
+        console.log('  └─ Database file loaded, size:', (blob.size / 1024 / 1024).toFixed(2), 'MB')
+        
+        const arrayBuffer = await blob.arrayBuffer()
+        console.log('  └─ Converted to ArrayBuffer, size:', arrayBuffer.byteLength, 'bytes')
 
-      const spl = await SPL();
-      const db = spl.db(arrayBuffer)
+        const spl = await SPL();
+        const db = spl.db(arrayBuffer)
+        console.log('  └─ Database initialized with SPL.js')
 
-      this.db = db
+        this.db = db
+        console.log('  ✅ Database ready for queries')
+      } catch (error) {
+        console.error('  ❌ Database loading failed:', error)
+        throw error
+      }
     },
 
     async getTableNames(db: any): Promise<string[]> {
-      if (!db) throw new Error('Database not loaded')
-      const result = await db.exec(`SELECT name FROM sqlite_master;`).get.objs
-
-      return result.map((row: any) => row.name)
+      if (!db) {
+        console.error('❌ Database not loaded for getTableNames')
+        throw new Error('Database not loaded')
+      }
+      
+      console.log('🔍 Querying database for table names...')
+      const result = await db.exec(`SELECT name FROM sqlite_master WHERE type='table';`).get.objs
+      const tableNames = result.map((row: any) => row.name)
+      
+      console.log(`  └─ Found ${tableNames.length} tables:`, tableNames)
+      return tableNames
     },    
     
     async getTableSchema(db: any, tableName: string): Promise<{ name: string; type: string; nullable: boolean }[]> {
-      if (!db) throw new Error('Database not loaded')
+      if (!db) {
+        console.error('❌ Database not loaded for getTableSchema')
+        throw new Error('Database not loaded')
+      }
 
+      console.log(`🔍 Getting schema for table: ${tableName}`)
       const result = await db.exec(`PRAGMA table_info("${tableName}");`).get.objs
-
-      return result.map((row: any) => ({
+      
+      const schema = result.map((row: any) => ({
         name: row.name,
         type: row.type,
         nullable: row.notnull === 0,
       }))
+      
+      console.log(`  └─ Schema (${schema.length} columns):`, schema.map(col => `${col.name}:${col.type}`).join(', '))
+      return schema
     },
 
     async getRowCount(db: any, tableName: string): Promise<number> {
-      if (!db) throw new Error('Database not loaded')
+      if (!db) {
+        console.error('❌ Database not loaded for getRowCount')
+        throw new Error('Database not loaded')
+      }
 
+      console.log(`📊 Counting rows in table: ${tableName}`)
       const result = await db.exec(`SELECT COUNT(*) as count FROM "${tableName}";`).get.objs
-      return result.length > 0 ? result[0].count : 0
+      const count = result.length > 0 ? result[0].count : 0
+      console.log(`  └─ Row count: ${count.toLocaleString()}`)
+      return count
     },
 
     async extractGeometryData() {
       try {
-        // Extract geometries from each table that has them
-        for (const table of this.tables) {
-          const tableName = table.name
-          const hasGeometry = table.columns.some(col => col.name.toLowerCase() === 'geometry')
+        console.log('🎯 Starting geometry extraction process...')
+        
+        // Convert reactive object to plain object to avoid proxy issues
+        const plainLayerConfigs = JSON.parse(JSON.stringify(this.layerConfigs))
+        
+        // Use layer configurations if available, otherwise extract from all geometry tables
+        const layersToProcess = Object.keys(plainLayerConfigs).length > 0 
+          ? Object.entries(plainLayerConfigs)
+          : this.tables
+              .filter(table => 
+                table.columns.some(col => col.name.toLowerCase() === 'geometry')
+              )
+              .map(table => [table.name, { table: table.name, type: 'line' as const }])
+        
+        if (layersToProcess.length === 0) {
+          return
+        }
+        
+        this.geoJsonFeatures = []
+        let totalFeatures = 0
+        
+        // Extract geometries from each configured layer
+        for (const [layerName, layerConfig] of layersToProcess) {
+          const tableName = (layerConfig as LayerConfig).table || layerName
+          const table = this.tables.find(t => t.name === tableName)
           
+          if (!table) continue
+          
+          const hasGeometry = table.columns.some(col => col.name.toLowerCase() === 'geometry')
           if (!hasGeometry) continue
           
           // Query to get all columns plus geometry as GeoJSON
@@ -336,17 +456,23 @@ const MyComponent = defineComponent({
           `
           
           const result = await this.db.exec(query).get.objs
-          console.log(`Got ${result.length} features from ${tableName}`)
           
           // Convert to GeoJSON features
-          for (const row of result) { // surely this is way too slow
+          let layerFeatureCount = 0
+          
+          for (const row of result) {
             try {
               if (!row.geojson_geom) continue
               
               const geometry = row.geojson_geom
               
               // Build properties from all non-geometry columns
-              const properties: any = { _table: tableName }
+              const properties: any = { 
+                _table: tableName,
+                _layer: layerName,
+                _layerConfig: layerConfig
+              }
+              
               for (const col of table.columns) {
                 if (col.name.toLowerCase() !== 'geometry' && col.name !== 'geojson_geom' && col.name !== 'geom_type') {
                   properties[col.name] = row[col.name]
@@ -360,18 +486,20 @@ const MyComponent = defineComponent({
               }
               
               this.geoJsonFeatures.push(feature)
+              layerFeatureCount++
             } catch (e) {
-              console.warn(`Error processing feature from ${tableName}:`, e)
+              // Skip invalid features silently
             }
           }
+          
+          totalFeatures += layerFeatureCount
         }
-        
-        console.log(`Total features extracted: ${this.geoJsonFeatures.length}`)
         
         // Update map visualization
         this.updateMapColors()
-      } catch (err) {
-        console.error('Error extracting geometry:', err)
+      } catch (err: any) {
+        console.error('❌ Error extracting geometry:', err)
+        console.error('  └─ Stack trace:', err.stack)
       }
     },
 
@@ -388,11 +516,12 @@ const MyComponent = defineComponent({
       const props = hoverInfo.object.properties
       const lines = []
       
-      // Show table name
-      if (props._table) lines.push(`Table: ${props._table}`)
+      // Show layer and table info
+      if (props._layer) lines.push(`Layer: ${props._layer}`)
+      if (props._table && props._table !== props._layer) lines.push(`Table: ${props._table}`)
       
       // Show up to 5 most relevant properties
-      const excludeProps = ['_table', 'geometry']
+      const excludeProps = ['_table', '_layer', '_layerConfig', 'geometry']
       const relevantProps = Object.entries(props)
         .filter(([key]) => !excludeProps.includes(key))
         .slice(0, 5)
@@ -407,21 +536,129 @@ const MyComponent = defineComponent({
     },
 
     updateMapColors() {
-      // This method can be extended later to support property-based coloring
-      // For now, use default colors
       const featureCount = this.geoJsonFeatures.length
-      if (featureCount === 0) return
+      console.log(`🎨 Updating map colors for ${featureCount} features`)
+      
+      if (featureCount === 0) {
+        console.log('  ⚠️  No features to style')
+        return
+      }
+      
+      // Validate features have required structure
+      const validFeatures = this.geoJsonFeatures.filter(f => f && f.geometry && f.properties)
+      if (validFeatures.length !== featureCount) {
+        console.warn(`⚠️  ${featureCount - validFeatures.length} invalid features found, filtering them out`)
+        this.geoJsonFeatures = validFeatures
+      }
       
       // Create filters (all features visible by default)
-      this.featureFilter = new Float32Array(featureCount).fill(1)
+      this.featureFilter = new Float32Array(validFeatures.length).fill(1)
+      console.log('  ✅ Feature filter initialized')
       
-      // Could add logic here to color by properties, e.g.:
-      // if (colorProperty && this.geoJsonFeatures[0]?.properties?.[colorProperty]) {
-      //   this.lineColors = this.calculateColorsByProperty(colorProperty)
-      // }
+      // Apply layer-based styling
+      console.log('  🎨 Applying layer-based styling...')
+      this.applyLayerStyling()
       
       this.redrawCounter++
+      console.log(`  ✅ Map styling complete, redraw counter: ${this.redrawCounter}`)
     },
+
+    applyLayerStyling() {
+      const featureCount = this.geoJsonFeatures.length
+      console.log(`🎨 Applying layer styling to ${featureCount} features`)
+      
+      if (featureCount === 0) {
+        console.log('  ⚠️  No features to style')
+        return
+      }
+      
+      // Initialize color and size arrays
+      console.log('  📊 Initializing styling arrays...')
+      const fillColors = new Uint8ClampedArray(featureCount * 4)
+      const lineColors = new Uint8ClampedArray(featureCount * 3) // RGB only for lines
+      const lineWidths = new Float32Array(featureCount)
+      const pointRadii = new Float32Array(featureCount)
+      
+      const styleStats: any = {}
+      let defaultStyles = 0
+      
+      // Apply styling for each feature based on its layer configuration
+      console.log('  🔄 Processing feature styles...')
+      this.geoJsonFeatures.forEach((feature, i) => {
+        // Null safety checks
+        if (!feature || !feature.properties || !feature.geometry) {
+          console.warn(`  ⚠️  Invalid feature at index ${i}:`, feature)
+          return
+        }
+        
+        const layerConfig = feature.properties._layerConfig || {}
+        const layerName = feature.properties._layer || 'unknown'
+        const geomType = (feature.geometry.type || '').toLowerCase()
+        
+        // Track style statistics
+        if (!styleStats[layerName]) {
+          styleStats[layerName] = { count: 0, fillColor: layerConfig.fillColor, strokeColor: layerConfig.strokeColor }
+        }
+        styleStats[layerName].count++
+        
+        if (!layerConfig.fillColor && !layerConfig.strokeColor) {
+          defaultStyles++
+        }
+        
+        // Set fill colors (for polygons and points)
+        const fillColor = this.parseColor(layerConfig.fillColor || '#59a14f')
+        fillColors[i * 4] = fillColor.r
+        fillColors[i * 4 + 1] = fillColor.g
+        fillColors[i * 4 + 2] = fillColor.b
+        fillColors[i * 4 + 3] = Math.round((layerConfig.opacity || 0.8) * 255)
+        
+        // Set line colors (for lines and polygon outlines) 
+        const strokeColor = this.parseColor(layerConfig.strokeColor || layerConfig.fillColor || '#4e79a7')
+        lineColors[i * 3] = strokeColor.r
+        lineColors[i * 3 + 1] = strokeColor.g
+        lineColors[i * 3 + 2] = strokeColor.b
+        
+        // Set line widths based on geometry type
+        // Polygons should have thinner outlines, lines should be more prominent
+        if (layerConfig.strokeWidth !== undefined) {
+          lineWidths[i] = layerConfig.strokeWidth
+        } else if (geomType.includes('polygon')) {
+          lineWidths[i] = 1 // Thin outline for polygons
+        } else if (geomType.includes('line')) {
+          lineWidths[i] = 3 // Thicker for lines
+        } else {
+          lineWidths[i] = 2 // Default for points
+        }
+        
+        // Set point radii
+        pointRadii[i] = layerConfig.radius || 4
+      })
+      
+      // Update component properties - always use arrays to ensure consistent rendering
+      this.fillColors = fillColors
+      this.lineColors = lineColors
+      this.lineWidths = lineWidths
+      this.pointRadii = pointRadii
+      
+      // Set RGBA flag when using color arrays
+      this.isRGBA = true
+    },
+
+    parseColor(colorString: string): { r: number, g: number, b: number } {
+      // Parse hex color string to RGB
+      if (colorString.startsWith('#')) {
+        const hex = colorString.slice(1)
+        const r = parseInt(hex.slice(0, 2), 16)
+        const g = parseInt(hex.slice(2, 4), 16)
+        const b = parseInt(hex.slice(4, 6), 16)
+        return { r, g, b }
+      }
+      
+      // Default color if parsing fails
+      return { r: 89, g: 161, b: 79 }
+    },
+
+
 
 
   },
