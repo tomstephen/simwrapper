@@ -91,6 +91,7 @@ const MyComponent = defineComponent({
       aeqFileSystem: null as any,
       spl: null as any,
       db: null as any,
+      extraDbs: new Map() as Map<string, any>,
       tables: [] as Array<{name: string, type: string, rowCount: number, columns: any[]}>,
       searchTerm: '',
       isLoaded: false,
@@ -156,12 +157,28 @@ const MyComponent = defineComponent({
       this.loadingText = 'Loading SQL engine with spatialite...'
       this.spl = await initSql()
 
-      // Load the database
+      // Load the main database
       this.loadingText = 'Loading database...'
       const dbPath = this.vizDetails.database
       const blob = await this.aeqFileSystem.getFileBlob(dbPath)
       const arrayBuffer = await blob.arrayBuffer()
       this.db = await openDb(this.spl, arrayBuffer)
+      
+      // Load extra databases for joins
+      if (this.vizDetails.extraDatabases) {
+        this.loadingText = 'Loading extra databases for joins...'
+        for (const [name, path] of Object.entries(this.vizDetails.extraDatabases)) {
+          try {
+            const extraBlob = await this.aeqFileSystem.getFileBlob(path)
+            const extraArrayBuffer = await extraBlob.arrayBuffer()
+            const extraDb = await openDb(this.spl, extraArrayBuffer)
+            this.extraDbs.set(name, extraDb)
+            console.log(`✅ Loaded extra database '${name}' from ${path}`)
+          } catch (e) {
+            console.warn(`⚠️ Failed to load extra database '${name}' from ${path}:`, e)
+          }
+        }
+      }
       
       // Get table information
       this.loadingText = 'Reading tables...'
@@ -171,7 +188,8 @@ const MyComponent = defineComponent({
 
       if (this.hasGeometry) {
         this.loadingText = 'Extracting geometries...'
-        const features = await buildGeoFeatures(this.db, this.tables, this.layerConfigs)
+        // Pass extra databases for join processing
+        const features = await buildGeoFeatures(this.db, this.tables, this.layerConfigs, this.extraDbs)
         this.geoJsonFeatures = features.filter((f: any) => f && f.geometry && f.properties)
 
         const styles = buildStyleArrays({
@@ -227,22 +245,35 @@ const MyComponent = defineComponent({
         // Capture view preference from config
         if (this.config.view) this.vizDetails.view = this.config.view
         
-        // Populate layer configurations for rendering
+        // Process extraDatabases paths
+        if (this.config.extraDatabases) {
+          const extraDatabases: Record<string, string> = {}
+          for (const [name, path] of Object.entries(this.config.extraDatabases)) {
+            const pathStr = path as string
+            extraDatabases[name] = pathStr.startsWith('/') 
+              ? pathStr 
+              : `${this.subfolder}/${pathStr}`
+          }
+          this.vizDetails.extraDatabases = extraDatabases
+        }
+        
+        // Populate layer configurations for rendering (includes join configs)
         this.layerConfigs = this.config.layers || {}
-        // Example layer styling:
+        // Example layer styling with joins:
         // layers:
         //   links:
         //     table: links
         //     geometry: geom
+        //     join:
+        //       database: results         # Key from extraDatabases
+        //       table: car_skims_results
+        //       leftKey: link_id          # Column in links table
+        //       rightKey: link_id         # Column in results table
+        //       type: left                # left or inner
         //     style:
         //       fillColor: { column: 'link_type', scheme: 'Category10' }
-        //       lineColor: { column: 'status', scheme: 'Set2' }
+        //       lineColor: { column: 'travel_time_ratio', scheme: 'RdYlGn' }
         //       lineWidth: { column: 'lanes', range: [1, 6] }
-        //       pointRadius: { column: 'traffic', range: [2, 12] }
-        //       fillHeight: { column: 'elevation', range: [0, 100] }
-        //       filter: { column: 'status', include: ['open'] }
-        //       fillHeight: { column: 'elevation', range: [0, 100] }
-        // ...existing code...
       } else if (this.yamlConfig) {
         // Need to load and parse the YAML file first
         const yamlPath = this.subfolder ? `${this.subfolder}/${this.yamlConfig}` : this.yamlConfig
@@ -253,7 +284,6 @@ const MyComponent = defineComponent({
         this.vizDetails = parsed
         this.layerConfigs = parsed.layers || {}
         // same styling shape as above is supported
-        // ...existing code...
       } else {
         throw new Error('No config or yamlConfig provided')
       }

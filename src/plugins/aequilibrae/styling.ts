@@ -68,6 +68,12 @@ const palettes: Record<string, string[]> = {
   YlGn: ['#ffffcc', '#d9f0a3', '#addd8e', '#78c679', '#31a354', '#006837'],
   Blues: ['#eff3ff', '#c6dbef', '#9ecae1', '#6baed6', '#3182bd', '#08519c'],
   Reds: ['#fee5d9', '#fcbba1', '#fc9272', '#fb6a4a', '#de2d26', '#a50f15'],
+  // Diverging palettes - useful for ratio/deviation visualization
+  RdYlGn: ['#d73027', '#fc8d59', '#fee08b', '#d9ef8b', '#91cf60', '#1a9850'],
+  RdBu: ['#b2182b', '#ef8a62', '#fddbc7', '#d1e5f0', '#67a9cf', '#2166ac'],
+  PiYG: ['#c51b7d', '#e9a3c9', '#fde0ef', '#e6f5d0', '#a1d76a', '#4d9221'],
+  // Viridis-like for continuous data
+  Viridis: ['#440154', '#482878', '#3e4a89', '#31688e', '#26838f', '#1f9e89', '#6cce5a', '#b6de2b', '#fee825'],
 }
 
 function hexToRgba(hex: string, alpha = 255): RGBA {
@@ -147,10 +153,30 @@ function interpolateColorRgb(t: number, colors: RGB[]): RGB {
   ]
 }
 
-function buildQuantitativeColorEncoder(values: (number | null)[], scheme = 'YlGn', colorRange?: [string, string]) {
+/**
+ * Build a quantitative color encoder for fill colors (RGBA)
+ * @param values - Array of numeric values to encode
+ * @param scheme - Color scheme name (e.g., 'RdYlGn', 'Blues')
+ * @param colorRange - Optional custom color range as [startHex, endHex]
+ * @param dataRange - Optional data range [min, max] to clamp values (prevents outliers from dominating)
+ */
+function buildQuantitativeColorEncoder(
+  values: (number | null)[],
+  scheme = 'YlGn',
+  colorRange?: [string, string],
+  dataRange?: [number, number]
+) {
   const nums = values.filter((v): v is number => v !== null)
-  const min = nums.length ? Math.min(...nums) : 0
-  const max = nums.length ? Math.max(...nums) : 1
+  
+  // Use provided dataRange or auto-compute from data
+  let min: number, max: number
+  if (dataRange && dataRange.length === 2) {
+    min = dataRange[0]
+    max = dataRange[1]
+  } else {
+    min = nums.length ? Math.min(...nums) : 0
+    max = nums.length ? Math.max(...nums) : 1
+  }
   
   let colors: RGBA[]
   if (colorRange) {
@@ -162,15 +188,38 @@ function buildQuantitativeColorEncoder(values: (number | null)[], scheme = 'YlGn
   
   return (v: number | null) => {
     const val = v ?? min
-    const t = max === min ? 0.5 : (val - min) / (max - min)
+    // Clamp value to range before computing t
+    const clampedVal = Math.max(min, Math.min(max, val))
+    const t = max === min ? 0.5 : (clampedVal - min) / (max - min)
     return interpolateColor(t, colors)
   }
 }
 
-function buildQuantitativeLineColorEncoder(values: (number | null)[], scheme = 'YlGn', colorRange?: [string, string]) {
+
+/**
+ * Build a quantitative color encoder for line colors (RGB)
+ * @param values - Array of numeric values to encode
+ * @param scheme - Color scheme name (e.g., 'RdYlGn', 'Blues')
+ * @param colorRange - Optional custom color range as [startHex, endHex]
+ * @param dataRange - Optional data range [min, max] to clamp values (prevents outliers from dominating)
+ */
+function buildQuantitativeLineColorEncoder(
+  values: (number | null)[],
+  scheme = 'YlGn',
+  colorRange?: [string, string],
+  dataRange?: [number, number]
+) {
   const nums = values.filter((v): v is number => v !== null)
-  const min = nums.length ? Math.min(...nums) : 0
-  const max = nums.length ? Math.max(...nums) : 1
+  
+  // Use provided dataRange or auto-compute from data
+  let min: number, max: number
+  if (dataRange && dataRange.length === 2) {
+    min = dataRange[0]
+    max = dataRange[1]
+  } else {
+    min = nums.length ? Math.min(...nums) : 0
+    max = nums.length ? Math.max(...nums) : 1
+  }
   
   let colors: RGB[]
   if (colorRange) {
@@ -182,7 +231,9 @@ function buildQuantitativeLineColorEncoder(values: (number | null)[], scheme = '
   
   return (v: number | null) => {
     const val = v ?? min
-    const t = max === min ? 0.5 : (val - min) / (max - min)
+    // Clamp value to range before computing t
+    const clampedVal = Math.max(min, Math.min(max, val))
+    const t = max === min ? 0.5 : (clampedVal - min) / (max - min)
     return interpolateColorRgb(t, colors)
   }
 }
@@ -191,9 +242,13 @@ function isCategoricalColorMapping(mapping: any): boolean {
   // If it has colorRange or a sequential scheme, treat as quantitative
   if (mapping.colorRange) return false
   if (mapping.range && Array.isArray(mapping.range) && typeof mapping.range[0] === 'number') return false
-  // Sequential palette names
-  const sequentialSchemes = ['YlGn', 'Blues', 'Reds', 'Greens', 'Oranges', 'Purples', 'YlOrRd', 'YlOrBr']
-  if (mapping.scheme && sequentialSchemes.includes(mapping.scheme)) return false
+  // Sequential and diverging palette names (quantitative/continuous)
+  const quantitativeSchemes = [
+    'YlGn', 'Blues', 'Reds', 'Greens', 'Oranges', 'Purples', 'YlOrRd', 'YlOrBr',
+    'RdYlGn', 'RdBu', 'PiYG',  // Diverging - great for ratios
+    'Viridis',                   // Perceptually uniform
+  ]
+  if (mapping.scheme && quantitativeSchemes.includes(mapping.scheme)) return false
   return true
 }
 
@@ -299,10 +354,13 @@ export function buildStyleArrays(args: BuildArgs): BuildResult {
         }
       } else {
         const numValues = values.map(v => toNumber(v))
+        // range can be used to clamp data values (prevents outliers from dominating)
+        const dataRange = (style.fillColor as any).range as [number, number] | undefined
         const encoder = buildQuantitativeColorEncoder(
           numValues,
           (style.fillColor as any).scheme,
-          (style.fillColor as any).colorRange
+          (style.fillColor as any).colorRange,
+          dataRange
         )
         for (let j = 0; j < idxs.length; j++) {
           const i = idxs[j]
@@ -324,10 +382,13 @@ export function buildStyleArrays(args: BuildArgs): BuildResult {
         }
       } else {
         const numValues = values.map(v => toNumber(v))
+        // range can be used to clamp data values (prevents outliers from dominating)
+        const dataRange = (style.lineColor as any).range as [number, number] | undefined
         const encoder = buildQuantitativeLineColorEncoder(
           numValues,
           (style.lineColor as any).scheme,
-          (style.lineColor as any).colorRange
+          (style.lineColor as any).colorRange,
+          dataRange
         )
         for (let j = 0; j < idxs.length; j++) {
           const i = idxs[j]

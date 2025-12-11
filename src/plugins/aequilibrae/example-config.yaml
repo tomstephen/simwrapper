@@ -7,6 +7,12 @@ description: "Visualize network nodes, links, and zones from AequilibraE"
 # Path to the AequilibraE database file (relative to this YAML file)
 database: project_database.sqlite
 
+# Optional: Additional databases for joining results data
+# Keys are reference names used in layer join configurations
+extraDatabases:
+  results: results_database.sqlite
+  # You can add multiple: another_db: another_results.sqlite
+
 # Define which database tables/layers to render and their styling
 layers:
   zones:
@@ -21,10 +27,30 @@ layers:
   links:
     table: links
     type: line
-    strokeColor: "#FF6600"  # Bright orange
+    
+    # Join simulation results from an external database
+    join:
+      database: results              # Reference to extraDatabases key
+      table: car_skims_results       # Table name in the results database
+      leftKey: link_id               # Column in links table
+      rightKey: link_id              # Column in results table
+      type: left                     # left = keep all links, inner = only matched
+      # columns: [travel_time_ratio, volume]  # Optional: specific columns only
+    
+    # Style using columns from both main and joined tables
+    style:
+      lineColor:
+        column: travel_time_ratio    # Column from joined results
+        scheme: RdYlGn               # Red-Yellow-Green diverging scale
+        # reversed: true             # Optional: reverse the color scale
+      lineWidth:
+        column: lanes_ab             # Column from main links table
+        range: [1, 6]
+    
+    strokeColor: "#FF6600"  # Fallback color if no style defined
     strokeWidth: 3
     opacity: 0.9
-    zIndex: 2  # Render on top
+    zIndex: 2
     
   nodes:
     table: nodes
