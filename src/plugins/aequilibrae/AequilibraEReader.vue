@@ -153,7 +153,6 @@ const MyComponent = defineComponent({
         return
       }
 
-      // Initialize SQL engine with spatialite
       this.loadingText = 'Loading SQL engine with spatialite...'
       this.spl = await initSql()
 
@@ -170,17 +169,28 @@ const MyComponent = defineComponent({
       this.tables = tables
       this.hasGeometry = hasGeometry
 
-      // Extract geometry if available
       if (this.hasGeometry) {
         this.loadingText = 'Extracting geometries...'
         const features = await buildGeoFeatures(this.db, this.tables, this.layerConfigs)
         this.geoJsonFeatures = features.filter((f: any) => f && f.geometry && f.properties)
-        const { fillColors, lineColors, lineWidths, pointRadii, featureFilter } = buildStyleArrays(this.geoJsonFeatures)
-        this.fillColors = fillColors
-        this.lineColors = lineColors
-        this.lineWidths = lineWidths
-        this.pointRadii = pointRadii
-        this.featureFilter = featureFilter
+
+        const styles = buildStyleArrays({
+          features: this.geoJsonFeatures,
+          layers: this.layerConfigs,
+          defaults: {
+            fillColor: '#59a14f',
+            lineColor: '#4e79a7',
+            lineWidth: 2,
+            pointRadius: 4,
+            fillHeight: 0,
+          },
+        })
+        this.fillColors = styles.fillColors
+        this.lineColors = styles.lineColors
+        this.lineWidths = styles.lineWidths
+        this.pointRadii = styles.pointRadii
+        this.fillHeights = styles.fillHeights
+        this.featureFilter = styles.featureFilter
         this.isRGBA = true
         this.redrawCounter++
       } else {
@@ -218,8 +228,20 @@ const MyComponent = defineComponent({
         
         // Populate layer configurations for rendering
         this.layerConfigs = this.config.layers || {}
-        
-        this.$emit('titles', this.vizDetails.title || dbFile || 'AequilibraE Database')
+        // Example layer styling:
+        // layers:
+        //   links:
+        //     table: links
+        //     geometry: geom
+        //     style:
+        //       fillColor: { column: 'link_type', scheme: 'Category10' }
+        //       lineColor: { column: 'status', scheme: 'Set2' }
+        //       lineWidth: { column: 'lanes', range: [1, 6] }
+        //       pointRadius: { column: 'traffic', range: [2, 12] }
+        //       fillHeight: { column: 'elevation', range: [0, 100] }
+        //       filter: { column: 'status', include: ['open'] }
+        //       fillHeight: { column: 'elevation', range: [0, 100] }
+        // ...existing code...
       } else if (this.yamlConfig) {
         // Need to load and parse the YAML file first
         const yamlPath = this.subfolder ? `${this.subfolder}/${this.yamlConfig}` : this.yamlConfig
@@ -229,7 +251,8 @@ const MyComponent = defineComponent({
         const parsed = await parseYamlConfig(yamlText, this.subfolder || null)
         this.vizDetails = parsed
         this.layerConfigs = parsed.layers || {}
-        this.$emit('titles', this.vizDetails.title)
+        // same styling shape as above is supported
+        // ...existing code...
       } else {
         throw new Error('No config or yamlConfig provided')
       }
